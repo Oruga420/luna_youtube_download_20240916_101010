@@ -14,11 +14,14 @@ type SerializableFormat = {
   qualityLabel: string;
   container: string;
   mimeType: string;
+  codecs: string;
   type: FormatType;
   hasAudio: boolean;
   hasVideo: boolean;
   fps: number | null;
   bitrate: number | null;
+  audioBitrate: number | null;
+  audioSampleRate: number | null;
   sizeBytes: number | null;
 };
 
@@ -100,11 +103,17 @@ function normaliseFormats(formats: ytdl.videoFormat[]): SerializableFormat[] {
         qualityLabel: format.qualityLabel ?? "",
         container: format.container ?? "mp4",
         mimeType: format.mimeType ?? "",
+        codecs: (() => {
+          const codecsMatch = format.mimeType?.match(/codecs="([^"]+)"/i);
+          return codecsMatch ? codecsMatch[1] : "";
+        })(),
         type: getFormatType(format),
         hasAudio: Boolean(format.hasAudio),
         hasVideo: Boolean(format.hasVideo),
         fps: toNumber(format.fps),
         bitrate: toNumber(format.bitrate),
+        audioBitrate: toNumber((format as { audioBitrate?: number | string }).audioBitrate),
+        audioSampleRate: toNumber((format as { audioSampleRate?: number | string }).audioSampleRate),
         sizeBytes: sizeBytes ?? fallbackSize,
       } satisfies SerializableFormat;
     });

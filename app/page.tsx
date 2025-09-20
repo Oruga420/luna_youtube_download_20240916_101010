@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type FormatType = "video+audio" | "video-only" | "audio-only";
 
@@ -9,11 +9,14 @@ type VideoFormat = {
   qualityLabel: string;
   container: string;
   mimeType: string;
+  codecs: string;
   type: FormatType;
   hasAudio: boolean;
   hasVideo: boolean;
   fps: number | null;
   bitrate: number | null;
+  audioBitrate: number | null;
+  audioSampleRate: number | null;
   sizeBytes: number | null;
 };
 
@@ -35,6 +38,17 @@ const typeLabels: Record<FormatType, string> = {
   "video-only": "Video only",
   "audio-only": "Audio only",
 };
+
+type FilterValue = "all" | FormatType;
+
+const filterLabels: Record<FilterValue, string> = {
+  all: "All formats",
+  "video+audio": "Video & audio",
+  "video-only": "Video only",
+  "audio-only": "Audio only",
+};
+
+const filterOrder: FilterValue[] = ["video+audio", "video-only", "audio-only", "all"];
 
 function sortFormatsForDisplay(formats: VideoFormat[]): VideoFormat[] {
   if (formats.length === 0) {
@@ -125,9 +139,29 @@ export default function HomePage() {
   const [formats, setFormats] = useState<VideoFormat[]>([]);
   const [selectedItag, setSelectedItag] = useState<number | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<FilterValue>("video+audio");
 
   const sortedFormats = useMemo(() => sortFormatsForDisplay(formats), [formats]);
   const preferredItag = useMemo(() => choosePreferredItag(formats), [formats]);
+  const filteredFormats = useMemo(() => {
+    if (activeFilter === "all") {
+      return sortedFormats;
+    }
+
+    return sortedFormats.filter((format) => format.type === activeFilter);
+  }, [sortedFormats, activeFilter]);
+
+  useEffect(() => {
+    if (filteredFormats.length === 0) {
+      setSelectedItag((current) => (current === null ? current : null));
+      return;
+    }
+
+    const isSelectedStillVisible = filteredFormats.some((format) => format.itag === selectedItag);
+    if (!isSelectedStillVisible) {
+      setSelectedItag(filteredFormats[0]?.itag ?? null);
+    }
+  }, [filteredFormats, selectedItag]);
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -142,6 +176,7 @@ export default function HomePage() {
     setDetails(null);
     setFormats([]);
     setSelectedItag(null);
+    setActiveFilter("video+audio");
 
     try {
       const response = await fetch("/api/formats", {
@@ -161,7 +196,10 @@ export default function HomePage() {
 
       setDetails(nextDetails);
       setFormats(nextFormats);
-      setSelectedItag(choosePreferredItag(nextFormats));
+      const bestItag = choosePreferredItag(nextFormats);
+      setSelectedItag(bestItag);
+      const bestFormat = nextFormats.find((format) => format.itag === bestItag);
+      setActiveFilter(bestFormat?.type ?? "all");
       setStatus({
         type: "success",
         message: `Found ${payload.formats?.length ?? 0} downloadable format${
@@ -247,9 +285,34 @@ export default function HomePage() {
 
       {sortedFormats.length > 0 && (
         <section className="format-list" aria-label="Available download formats">
-          {sortedFormats.map((format) => {
+          <div className="filter-controls" role="tablist" aria-label="Filter formats by type">
+            {filterOrder.map((filter) => {
+              const isActive = activeFilter === filter;
+              return (
+                <button
+                  key={filter}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  className={`filter-pill${isActive ? " active" : ""}`}
+                  onClick={() => setActiveFilter(filter)}
+                >
+                  {filterLabels[filter]}
+                </button>
+              );
+            })}
+          </div>
+
+          {filteredFormats.length === 0 ? (
+            <p className="empty-formats">No formats match this filter. Try another option.</p>
+          ) : null}
+
+          {filteredFormats.map((format) => {
             const isSelected = selectedItag === format.itag;
             const displayLabel = format.qualityLabel || format.mimeType || `Format ${format.itag}`;
+            const codecTokens = format.codecs
+              ? format.codecs.split(",").map((token) => token.trim()).filter(Boolean)
+              : [];
 
             return (
               <div
@@ -269,8 +332,13 @@ export default function HomePage() {
                 <div className="format-meta">
                   <span>{typeLabels[format.type]}</span>
                   {format.fps ? <span>{format.fps} fps</span> : null}
-                  {format.bitrate ? <span>{Math.round(format.bitrate / 1000)} kbps</span> : null}
+                  {format.bitrate ? <span>{Math.round(format.bitrate / 1000)} kbps video</span> : null}
+                  {format.audioBitrate ? <span>{format.audioBitrate} kbps audio</span> : null}
+                  {format.audioSampleRate
+                    ? <span>{(format.audioSampleRate / 1000).toFixed(1)} kHz</span>
+                    : null}
                   {format.container ? <span>{format.container.toUpperCase()}</span> : null}
+                  {codecTokens.length > 0 ? <span>{codecTokens.join(" + ")}</span> : null}
                   <span>{format.sizeBytes ? formatFileSize(format.sizeBytes) : "Size varies"}</span>
                 </div>
               </div>
